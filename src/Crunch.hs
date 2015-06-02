@@ -77,6 +77,8 @@ import System.Posix.Types
     , CDev
     )
 
+-- TODO: Implementaton using GHC generics
+
 -- | An action that reads from a handle and returns some @a@
 newtype Get a = Get { unGet :: IO.Handle -> IO a }
 
@@ -229,23 +231,20 @@ instance (Serializable a, Serializable b, Serializable c) => Serializable (a, b,
 
 instance Serializable a => Serializable [a] where
     get = do
-        b <- get :: Get Word8
-        case b of
+        n <- get :: Get Word8
+        case n of
             0 -> return []
-            1 -> do
-                n      <- get :: Get Int
-                prefix <- replicateM n get
+            _ -> do
+                prefix <- replicateM (fromIntegral n) get
                 fmap (prefix ++) get
-            _ -> fail "Storable a => Serializable [a]: get - Invalid tag byte"
     put as = case as of
         [] -> put (0 :: Word8)
         _  -> do
-            put (1 :: Word8)
             let chunkSize = 100 :: Int
                 (prefix, suffix) = splitAt chunkSize as
-            case suffix of
-                [] -> put (length prefix)
-                _  -> put  chunkSize
+            put (case suffix of
+                [] -> length prefix
+                _  -> chunkSize )
             mapM_ put prefix
             put suffix
 
