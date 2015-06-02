@@ -1,6 +1,13 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE DefaultSignatures          #-}
+
+{-| Example usage:
+
+>>> encodeFile "test.dat" (1 :: Int, False)
+>>> decodeFile "test.dat" :: IO (Int, Bool)
+(1, False)
+
+-}
 
 module Crunch (
     -- * Handle operations
@@ -13,9 +20,8 @@ module Crunch (
     , Serializable(..)
     ) where
 
-import Control.Applicative (Applicative)
+import Control.Applicative (Applicative(..))
 import Control.Monad (replicateM)
-import Control.Monad.Trans.Reader
 import qualified Data.Vector          as V
 import qualified Data.Vector.Storable as VS
 import qualified System.IO as IO
@@ -71,36 +77,73 @@ import System.Posix.Types
     , CDev
     )
 
--- TODO: Implement `ReaderT` inline
+-- | An action that reads from a handle and returns some @a@
+newtype Get a = Get { unGet :: IO.Handle -> IO a }
 
-newtype Get a = Get { unGet :: ReaderT IO.Handle IO a }
-    deriving (Functor, Applicative, Monad)
+instance Functor Get where
+    fmap f (Get k) = Get (\handle -> fmap f (k handle))
 
-newtype Put a = Put { unPut :: ReaderT IO.Handle IO a }
-    deriving (Functor, Applicative, Monad)
+instance Applicative Get where
+    pure a = Get (\_ -> pure a)
 
+    Get f <*> Get x = Get (\handle -> f handle <*> x handle)
+
+instance Monad Get where
+    return a = Get (\_ -> return a)
+
+    m >>= f = Get (\handle -> do
+        a <- unGet m handle
+        unGet (f a) handle )
+
+-- | An action that writes to a handle and returns some @a@
+newtype Put a = Put { unPut :: IO.Handle -> IO a }
+
+instance Functor Put where
+    fmap f (Put k) = Put (\handle -> fmap f (k handle))
+
+instance Applicative Put where
+    pure a = Put (\_ -> pure a)
+
+    Put f <*> Put x = Put (\handle -> f handle <*> x handle)
+
+instance Monad Put where
+    return a = Put (\_ -> return a)
+
+    m >>= f = Put (\handle -> do
+        a <- unPut m handle
+        unPut (f a) handle )
+
+-- | Write a value to a file
 encodeFile :: Serializable a => FilePath -> a -> IO ()
-encodeFile file a = IO.withFile file IO.WriteMode (runReaderT (unPut (put a)))
+encodeFile file a = IO.withFile file IO.WriteMode (unPut (put a))
 
+-- | Read a value from a file
 decodeFile :: Serializable a => FilePath -> IO a
-decodeFile file = IO.withFile file IO.ReadMode (runReaderT (unGet get))
+decodeFile file = IO.withFile file IO.ReadMode (unGet get)
 
+{-| A value that can be serialized and deserialized
+
+    `Serializable` has a default implementation for `Storable` types, so if
+    your type @T@ implements `Storable`, then you can automatically derive a
+    `Serializable` instance by writing:
+
+> instance Serializable T
+-}
 class Serializable a where
     get :: Get a
     default get :: Storable a => Get a
-    get   = Get (ReaderT (\handle -> Foreign.alloca (\pointer -> do
+    get   = Get (\handle -> Foreign.alloca (\pointer -> do
         let numBytes = Foreign.sizeOf (undefined :: a)
         n <- IO.hGetBuf handle pointer (Foreign.sizeOf numBytes)
         if n < numBytes
             then fail "Storable a => Serializable a: get - Insufficient bytes"
             else return ()
-        Foreign.peek pointer )))
+        Foreign.peek pointer ))
 
     put :: a -> Put ()
     default put :: Storable a => a -> Put ()
-    put a = Put (ReaderT (\handle -> do
-        Foreign.with a (\pointer ->
-            IO.hPutBuf handle pointer (Foreign.sizeOf (undefined :: a)) ) ))
+    put a = Put (\handle -> Foreign.with a (\pointer ->
+        IO.hPutBuf handle pointer (Foreign.sizeOf (undefined :: a)) ))
 
 instance Serializable Bool
 instance Serializable Char
@@ -210,7 +253,7 @@ instance Storable a => Serializable (VS.Vector a) where
     get = do
         numElements <- get
         let elementSize = Foreign.sizeOf (undefined :: a)
-        Get (ReaderT (\handle -> do
+        Get (\handle -> do
             foreignPointer <- Foreign.mallocForeignPtrArray numElements
             let numBytes = numElements * elementSize
             n <- Foreign.withForeignPtr foreignPointer (\pointer ->
@@ -218,24 +261,22 @@ instance Storable a => Serializable (VS.Vector a) where
             if n < numBytes
                 then fail "Storable a => Serializable a: get - Insufficient bytes"
                 else return ()
-            return (VS.unsafeFromForeignPtr0 foreignPointer numElements)))
+            return (VS.unsafeFromForeignPtr0 foreignPointer numElements))
 
     put v = do
         let numElements = VS.length v
             elementSize = Foreign.sizeOf (undefined :: a)
         put numElements
-        Put (ReaderT (\handle -> VS.unsafeWith v (\pointer ->
-            IO.hPutBuf handle pointer (numElements * elementSize) )))
+        Put (\handle -> VS.unsafeWith v (\pointer ->
+            IO.hPutBuf handle pointer (numElements * elementSize) ))
 
 instance Serializable a => Serializable (V.Vector a) where
     get = do
         n  <- get
         -- Equivalent to `V.replicateM n get`, but faster due to specialization
-        Get (ReaderT (\handle ->
-            V.replicateM n (runReaderT (unGet get) handle) ))
+        Get (\handle -> V.replicateM n (unGet get handle))
 
     put v = do
         put (V.length v)
         -- Equivalent to `V.mapM_ put v`, but faster due to specialization
-        Put (ReaderT (\handle ->
-            V.mapM_ (\a -> runReaderT (unPut (put a)) handle) v ))
+        Put (\handle -> V.mapM_ (\a -> unPut (put a) handle) v)

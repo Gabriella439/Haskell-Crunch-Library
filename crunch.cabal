@@ -20,7 +20,6 @@ Library
     HS-Source-Dirs: src
     Build-Depends:
         base         >= 4.6      && < 5  ,
-        transformers >= 0.2.0.0  && < 0.5,
         vector       >= 0.10.0.1 && < 0.11
     Exposed-Modules: Crunch
     GHC-Options: -O2 -Wall
