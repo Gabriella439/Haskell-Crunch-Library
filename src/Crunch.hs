@@ -229,6 +229,120 @@ instance (Serializable a, Serializable b, Serializable c) => Serializable (a, b,
         put b
         put c
 
+instance (Serializable a, Serializable b, Serializable c, Serializable d) => Serializable (a, b, c, d) where
+    get = do
+        a <- get
+        b <- get
+        c <- get
+        d <- get
+        return (a, b, c, d)
+
+    put (a, b, c, d) = do
+        put a
+        put b
+        put c
+        put d
+
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e) => Serializable (a, b, c, d, e) where
+    get = do
+        a <- get
+        b <- get
+        c <- get
+        d <- get
+        e <- get
+        return (a, b, c, d, e)
+
+    put (a, b, c, d, e) = do
+        put a
+        put b
+        put c
+        put d
+        put e
+
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f) => Serializable (a, b, c, d, e, f) where
+    get = do
+        a <- get
+        b <- get
+        c <- get
+        d <- get
+        e <- get
+        f <- get
+        return (a, b, c, d, e, f)
+
+    put (a, b, c, d, e, f) = do
+        put a
+        put b
+        put c
+        put d
+        put e
+        put f
+
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g) => Serializable (a, b, c, d, e, f, g) where
+    get = do
+        a <- get
+        b <- get
+        c <- get
+        d <- get
+        e <- get
+        f <- get
+        g <- get
+        return (a, b, c, d, e, f, g)
+
+    put (a, b, c, d, e, f, g) = do
+        put a
+        put b
+        put c
+        put d
+        put e
+        put f
+        put g
+
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g, Serializable h) => Serializable (a, b, c, d, e, f, g, h) where
+    get = do
+        a <- get
+        b <- get
+        c <- get
+        d <- get
+        e <- get
+        f <- get
+        g <- get
+        h <- get
+        return (a, b, c, d, e, f, g, h)
+
+    put (a, b, c, d, e, f, g, h) = do
+        put a
+        put b
+        put c
+        put d
+        put e
+        put f
+        put g
+        put h
+
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g, Serializable h, Serializable i) => Serializable (a, b, c, d, e, f, g, h, i) where
+    get = do
+        a <- get
+        b <- get
+        c <- get
+        d <- get
+        e <- get
+        f <- get
+        g <- get
+        h <- get
+        i <- get
+        return (a, b, c, d, e, f, g, h, i)
+
+    put (a, b, c, d, e, f, g, h, i) = do
+        put a
+        put b
+        put c
+        put d
+        put e
+        put f
+        put g
+        put h
+        put i
+
 instance Serializable a => Serializable [a] where
     get = do
         n <- get :: Get Word8
