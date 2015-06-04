@@ -59,8 +59,10 @@ import qualified Data.Sequence as Seq
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Tree (Tree(..))
+import Data.Vector.Unboxed (Unbox)
 import qualified Data.Vector          as V
 import qualified Data.Vector.Storable as VS
+import qualified Data.Vector.Unboxed  as VU
 import qualified Foreign.Safe as Foreign
 import Foreign.Safe (Storable(..))
 import Network.Socket (Socket)
@@ -530,3 +532,8 @@ instance Serializable a => Serializable (Tree a) where
         a  <- get
         ts <- get
         return (Node a ts)
+
+instance (Unbox a, Serializable a) => Serializable (VU.Vector a) where
+    put v = put (VU.convert v :: V.Vector a)
+
+    get = fmap VU.convert (get :: Get (V.Vector a))
