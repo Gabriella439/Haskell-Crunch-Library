@@ -404,14 +404,14 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
 
 instance Serializable a => Serializable [a] where
     get = do
-        n <- get :: Get Word8
+        n <- get :: Get Int
         case n of
             0 -> return []
             _ -> do
                 prefix <- replicateM (fromIntegral n) get
                 fmap (prefix ++) get
     put as = case as of
-        [] -> put (0 :: Word8)
+        [] -> put (0 :: Int)
         _  -> do
             let chunkSize = 100 :: Int
                 (prefix, suffix) = splitAt chunkSize as
