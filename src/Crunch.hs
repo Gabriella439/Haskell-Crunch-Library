@@ -53,6 +53,7 @@ import qualified Data.ByteString.Unsafe as Unsafe
 import Data.Foldable (toList)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import Data.List (genericLength)
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Primitive as Primitive
@@ -427,18 +428,19 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
 
 instance Serializable a => Serializable [a] where
     put as = case as of
-        [] -> put (0 :: Int)
+        [] -> put (0 :: Word8)
         _  -> do
-            let chunkSize = 100 :: Int
-                (prefix, suffix) = splitAt chunkSize as
-            put (case suffix of
-                [] -> length prefix
-                _  -> chunkSize )
+            let maxChunkSize = 255 :: Word8
+            let (prefix, suffix) = splitAt (fromIntegral maxChunkSize) as
+            let chunkSize = case suffix of
+                    [] -> genericLength prefix
+                    _  -> maxChunkSize
+            put (chunkSize :: Word8)
             mapM_ put prefix
             put suffix
 
     get = do
-        n <- get :: Get Int
+        n <- get :: Get Word8
         case n of
             0 -> return []
             _ -> do
