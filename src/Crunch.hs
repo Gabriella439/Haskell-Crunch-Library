@@ -25,6 +25,15 @@
 >>> connect "127.0.0.1" "8000" (\(socket, _) -> encodeSocket socket ([1..10] :: [Int]))
 
     The server will print @[1,2,3,4,5,6,7,8,9,10]@
+
+    Example usage for `ByteString`s:
+
+>>> import Crunch
+>>> import Data.Text (Text)
+>>> :set -XOverloadedStrings
+>>> let bs = encodeBytes ("1234" :: Text)
+>>> decodeBytes bs :: Either SomeException Text
+Right "1234"
 -}
 
 module Crunch (
@@ -35,24 +44,34 @@ module Crunch (
     , decodeHandle
     , encodeSocket
     , decodeSocket
+    , encodeBytes
+    , decodeBytes
 
     -- * Serializable
     , Get
     , Put
     , Serializable(..)
+
+    -- * Re-exports
+    , ByteString
+    , SomeException
+    , Handle
+    , Socket
     ) where
 
 import Control.Applicative (Applicative(..))
-import Control.Exception (bracketOnError)
+import Control.Exception (SomeException, bracketOnError, try)
 import Control.Monad (replicateM)
 import Data.Array (Ix)
 import qualified Data.Array as A
+import Data.ByteString (ByteString)
 import qualified Data.ByteString      as StrictBytes
 import qualified Data.ByteString.Lazy as LazyBytes
 import qualified Data.ByteString.Unsafe as Unsafe
 import Data.Foldable (toList)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IORef as IORef
 import Data.List (genericLength)
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
@@ -72,6 +91,7 @@ import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Unboxed  as VU
 import qualified Foreign.Safe as Foreign
 import Foreign.Safe (Storable(..))
+import qualified Foreign.Marshal.Unsafe
 import qualified GHC.Ptr as Unsafe
 import Network.Socket (Socket)
 import Network.Socket.ByteString as Socket
@@ -194,7 +214,7 @@ encodeSocket socket a = unPut (put a) (\pointer numBytes -> do
 decodeSocket :: Serializable a => Socket -> IO a
 decodeSocket socket = unGet get (\pointer0 bytesRequired ->
     let loop pointer remainingBytes = do
-            bytestring <- Socket.recv socket (remainingBytes `min` 4096)
+            bytestring <- Socket.recv socket (min remainingBytes 4096)
             Unsafe.unsafeUseAsCStringLen bytestring (\(pointer', bytesReturned) ->
                 if bytesReturned == 0
                 then return (bytesRequired - remainingBytes)
@@ -205,6 +225,57 @@ decodeSocket socket = unGet get (\pointer0 bytesRequired ->
                                   (remainingBytes - bytesReturned)
                         else return bytesRequired )
     in  loop (Foreign.castPtr pointer0) bytesRequired )
+
+-- | Write a value to a `StrictBytes.ByteString`
+encodeBytes :: Serializable a => a -> StrictBytes.ByteString
+encodeBytes a = Foreign.Marshal.Unsafe.unsafeLocalState (do
+    let initialBufferSize = 256
+    destPointer0    <- Foreign.mallocBytes initialBufferSize
+    destPointerRef  <- IORef.newIORef destPointer0
+    bytesWrittenRef <- IORef.newIORef 0
+    bufferSizeRef   <- IORef.newIORef initialBufferSize
+    unPut (put a) (\pointer bytesRequested -> do
+        bytesWritten <- IORef.readIORef bytesWrittenRef
+        bufferSize   <- IORef.readIORef bufferSizeRef
+        let newBytesWritten = bytesWritten + bytesRequested
+        destPointer <- if newBytesWritten > bufferSize
+            then do
+                let newBufferSize = newBytesWritten * 2
+                destPointer <- IORef.readIORef destPointerRef
+                newDestPointer <- Foreign.reallocBytes destPointer newBufferSize
+                IORef.writeIORef destPointerRef newDestPointer
+                IORef.writeIORef bufferSizeRef  newBufferSize
+                return newDestPointer
+            else IORef.readIORef destPointerRef
+        Foreign.copyBytes
+            (Foreign.plusPtr destPointer bytesWritten)
+            pointer
+            bytesRequested
+        IORef.writeIORef bytesWrittenRef newBytesWritten )
+    destPointer  <- IORef.readIORef destPointerRef
+    bytesWritten <- IORef.readIORef bytesWrittenRef
+    Unsafe.unsafePackCStringFinalizer
+        destPointer
+        bytesWritten
+        (Foreign.free destPointer) )
+
+-- | Read a value from a `StrictBytes.ByteString`
+decodeBytes
+    :: Serializable a => StrictBytes.ByteString -> Either SomeException a
+decodeBytes bytestring = Foreign.Marshal.Unsafe.unsafeLocalState (try (do
+    Unsafe.unsafeUseAsCStringLen bytestring (\(srcPointer0, bytesRemaining0) -> do
+        srcPointerRef     <- IORef.newIORef srcPointer0
+        bytesRemainingRef <- IORef.newIORef bytesRemaining0
+        unGet get (\destPointer bytesRequested -> do
+            srcPointer     <- IORef.readIORef srcPointerRef
+            bytesRemaining <- IORef.readIORef bytesRemainingRef
+            let bytesRead = min bytesRequested bytesRemaining
+            Foreign.copyBytes (Foreign.castPtr destPointer) srcPointer bytesRead
+            IORef.writeIORef bytesRemainingRef (bytesRemaining - bytesRead)
+            IORef.writeIORef
+                srcPointerRef
+                (Foreign.plusPtr srcPointer bytesRead)
+            return bytesRead ) ) ))
 
 {-| A value that can be serialized and deserialized
 
