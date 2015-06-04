@@ -14,6 +14,10 @@ module Crunch (
     -- * Handle operations
       encodeFile
     , decodeFile
+    , encodeHandle
+    , decodeHandle
+    , encodeSocket
+    , decodeSocket
 
     -- * Serializable
     , Get
@@ -23,11 +27,15 @@ module Crunch (
 
 import Control.Applicative (Applicative(..))
 import Control.Monad (replicateM)
+import qualified Data.ByteString.Unsafe as Unsafe
 import qualified Data.Vector          as V
 import qualified Data.Vector.Storable as VS
-import qualified System.IO as IO
 import qualified Foreign.Safe as Foreign
-import Foreign (Storable(..))
+import Foreign.Safe (Storable(..))
+import Network.Socket (Socket)
+import Network.Socket.ByteString as Socket
+import qualified System.IO as IO
+import System.IO (Handle)
 
 import Data.Word (Word, Word8, Word16, Word32, Word64)
 import Data.Int  (       Int8,  Int16,  Int32,  Int64)
@@ -118,13 +126,44 @@ instance Monad Put where
 
 -- | Write a value to a file
 encodeFile :: Serializable a => FilePath -> a -> IO ()
-encodeFile file a =
-    IO.withFile file IO.WriteMode (\handle -> unPut (put a) (IO.hPutBuf handle))
+encodeFile file a = IO.withFile file IO.WriteMode (\handle -> encodeHandle handle a)
 
 -- | Read a value from a file
 decodeFile :: Serializable a => FilePath -> IO a
-decodeFile file =
-    IO.withFile file IO.ReadMode (\handle -> unGet get (IO.hGetBuf handle))
+decodeFile file = IO.withFile file IO.ReadMode decodeHandle
+
+-- | Write a value to a `Handle`
+encodeHandle :: Serializable a => Handle -> a -> IO ()
+encodeHandle handle a = unPut (put a) (IO.hPutBuf handle)
+
+-- | Read a value from a `Handle`
+decodeHandle :: Serializable a => Handle -> IO a
+decodeHandle handle = unGet get (IO.hGetBuf handle)
+
+-- | Write a value to a `Socket`
+encodeSocket :: Serializable a => Socket -> a -> IO ()
+encodeSocket socket a = unPut (put a) (\pointer numBytes -> do
+    bytestring <- Unsafe.unsafePackCStringFinalizer
+        (Foreign.castPtr pointer)
+        numBytes
+        (return ())
+    Socket.sendAll socket bytestring )
+
+-- | Read a value from a `Socket`
+decodeSocket :: Serializable a => Socket -> IO a
+decodeSocket socket = unGet get (\pointer0 bytesRequired ->
+    let loop pointer remainingBytes = do
+            bytestring <- Socket.recv socket (remainingBytes `min` 4096)
+            Unsafe.unsafeUseAsCStringLen bytestring (\(pointer', bytesReturned) ->
+                if bytesReturned == 0
+                then return (bytesRequired - remainingBytes)
+                else do
+                    Foreign.copyBytes pointer pointer' bytesReturned
+                    if bytesReturned < remainingBytes
+                        then loop (Foreign.plusPtr pointer bytesReturned)
+                                  (remainingBytes - bytesReturned)
+                        else return bytesRequired )
+    in  loop (Foreign.castPtr pointer0) bytesRequired )
 
 {-| A value that can be serialized and deserialized
 

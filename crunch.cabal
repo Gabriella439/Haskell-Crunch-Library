@@ -19,8 +19,10 @@ Source-Repository head
 Library
     HS-Source-Dirs: src
     Build-Depends:
-        base         >= 4.6      && < 5  ,
-        vector       >= 0.10.0.1 && < 0.11
+        base       >= 4.6      && < 5   ,
+        bytestring                < 0.11,
+        network    >= 2.2.3    && < 3.0 ,
+        vector     >= 0.10.0.1 && < 0.11
     Exposed-Modules: Crunch
     GHC-Options: -O2 -Wall
     Default-Language: Haskell2010
