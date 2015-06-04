@@ -42,7 +42,10 @@ module Crunch (
     ) where
 
 import Control.Applicative (Applicative(..))
+import Control.Exception (bracketOnError)
 import Control.Monad (replicateM)
+import qualified Data.ByteString      as Strict
+import qualified Data.ByteString.Lazy as Lazy
 import qualified Data.ByteString.Unsafe as Unsafe
 import qualified Data.Vector          as V
 import qualified Data.Vector.Storable as VS
@@ -451,3 +454,32 @@ instance Serializable a => Serializable (V.Vector a) where
         put (V.length v)
         -- Equivalent to `V.mapM_ put v`, but faster due to specialization
         Put (\putBuf -> V.mapM_ (\a -> unPut (put a) putBuf) v)
+
+instance Serializable Strict.ByteString where
+    put bytestring = Put (\putBuf -> do
+        Unsafe.unsafeUseAsCStringLen bytestring (\(pointer, numBytes) -> do
+            unPut (put numBytes) putBuf
+            putBuf pointer numBytes ) )
+
+    get = Get (\getBuf -> do
+        numBytes <- Foreign.alloca (\pointer -> do
+            let intSize = Foreign.sizeOf (undefined :: Int)
+            n <- getBuf pointer intSize
+            if n < intSize
+                then fail "Serializable ByteString: get - Insufficient bytes"
+                else return ()
+            Foreign.peek pointer )
+        bracketOnError (Foreign.mallocBytes numBytes) Foreign.free (\pointer -> do
+            n <- getBuf pointer numBytes
+            if n < numBytes
+                then fail "Serializable ByteString: get - Insufficient bytes"
+                else return ()
+            Unsafe.unsafePackCStringFinalizer
+                pointer
+                numBytes
+                (Foreign.free pointer) ) )
+
+instance Serializable Lazy.ByteString where
+    put bytestring = put (Lazy.toChunks bytestring)
+
+    get = fmap Lazy.fromChunks get
