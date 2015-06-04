@@ -1,5 +1,6 @@
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE DefaultSignatures          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DefaultSignatures   #-}
+{-# LANGUAGE RankNTypes          #-}
 
 {-| Example usage:
 
@@ -80,48 +81,50 @@ import System.Posix.Types
 -- TODO: Implementaton using GHC generics
 
 -- | An action that reads from a handle and returns some @a@
-newtype Get a = Get { unGet :: IO.Handle -> IO a }
+newtype Get a = Get { unGet :: (forall b . Ptr b -> Int -> IO Int) -> IO a }
 
 instance Functor Get where
-    fmap f (Get k) = Get (\handle -> fmap f (k handle))
+    fmap f (Get k) = Get (\getBuf -> fmap f (k getBuf))
 
 instance Applicative Get where
     pure a = Get (\_ -> pure a)
 
-    Get f <*> Get x = Get (\handle -> f handle <*> x handle)
+    Get f <*> Get x = Get (\getBuf -> f getBuf <*> x getBuf)
 
 instance Monad Get where
     return a = Get (\_ -> return a)
 
-    m >>= f = Get (\handle -> do
-        a <- unGet m handle
-        unGet (f a) handle )
+    m >>= f = Get (\getBuf -> do
+        a <- unGet m getBuf
+        unGet (f a) getBuf )
 
 -- | An action that writes to a handle and returns some @a@
-newtype Put a = Put { unPut :: IO.Handle -> IO a }
+newtype Put a = Put { unPut :: (forall b . Ptr b -> Int -> IO ()) -> IO a }
 
 instance Functor Put where
-    fmap f (Put k) = Put (\handle -> fmap f (k handle))
+    fmap f (Put k) = Put (\putBuf -> fmap f (k putBuf))
 
 instance Applicative Put where
     pure a = Put (\_ -> pure a)
 
-    Put f <*> Put x = Put (\handle -> f handle <*> x handle)
+    Put f <*> Put x = Put (\putBuf -> f putBuf <*> x putBuf)
 
 instance Monad Put where
     return a = Put (\_ -> return a)
 
-    m >>= f = Put (\handle -> do
-        a <- unPut m handle
-        unPut (f a) handle )
+    m >>= f = Put (\putBuf -> do
+        a <- unPut m putBuf
+        unPut (f a) putBuf )
 
 -- | Write a value to a file
 encodeFile :: Serializable a => FilePath -> a -> IO ()
-encodeFile file a = IO.withFile file IO.WriteMode (unPut (put a))
+encodeFile file a =
+    IO.withFile file IO.WriteMode (\handle -> unPut (put a) (IO.hPutBuf handle))
 
 -- | Read a value from a file
 decodeFile :: Serializable a => FilePath -> IO a
-decodeFile file = IO.withFile file IO.ReadMode (unGet get)
+decodeFile file =
+    IO.withFile file IO.ReadMode (\handle -> unGet get (IO.hGetBuf handle))
 
 {-| A value that can be serialized and deserialized
 
@@ -134,9 +137,9 @@ decodeFile file = IO.withFile file IO.ReadMode (unGet get)
 class Serializable a where
     get :: Get a
     default get :: Storable a => Get a
-    get   = Get (\handle -> Foreign.alloca (\pointer -> do
+    get   = Get (\getBuf -> Foreign.alloca (\pointer -> do
         let numBytes = Foreign.sizeOf (undefined :: a)
-        n <- IO.hGetBuf handle pointer (Foreign.sizeOf numBytes)
+        n <- getBuf pointer (Foreign.sizeOf numBytes)
         if n < numBytes
             then fail "Storable a => Serializable a: get - Insufficient bytes"
             else return ()
@@ -144,8 +147,8 @@ class Serializable a where
 
     put :: a -> Put ()
     default put :: Storable a => a -> Put ()
-    put a = Put (\handle -> Foreign.with a (\pointer ->
-        IO.hPutBuf handle pointer (Foreign.sizeOf (undefined :: a)) ))
+    put a = Put (\putBuf -> Foreign.with a (\pointer ->
+        putBuf pointer (Foreign.sizeOf (undefined :: a)) ))
 
 instance Serializable Bool
 instance Serializable Char
@@ -366,11 +369,11 @@ instance Storable a => Serializable (VS.Vector a) where
     get = do
         numElements <- get
         let elementSize = Foreign.sizeOf (undefined :: a)
-        Get (\handle -> do
+        Get (\getBuf -> do
             foreignPointer <- Foreign.mallocForeignPtrArray numElements
             let numBytes = numElements * elementSize
             n <- Foreign.withForeignPtr foreignPointer (\pointer ->
-                IO.hGetBuf handle pointer numBytes )
+                getBuf pointer numBytes )
             if n < numBytes
                 then fail "Storable a => Serializable a: get - Insufficient bytes"
                 else return ()
@@ -380,16 +383,16 @@ instance Storable a => Serializable (VS.Vector a) where
         let numElements = VS.length v
             elementSize = Foreign.sizeOf (undefined :: a)
         put numElements
-        Put (\handle -> VS.unsafeWith v (\pointer ->
-            IO.hPutBuf handle pointer (numElements * elementSize) ))
+        Put (\putBuf -> VS.unsafeWith v (\pointer ->
+            putBuf pointer (numElements * elementSize) ))
 
 instance Serializable a => Serializable (V.Vector a) where
     get = do
         n  <- get
         -- Equivalent to `V.replicateM n get`, but faster due to specialization
-        Get (\handle -> V.replicateM n (unGet get handle))
+        Get (\getBuf -> V.replicateM n (unGet get getBuf))
 
     put v = do
         put (V.length v)
         -- Equivalent to `V.mapM_ put v`, but faster due to specialization
-        Put (\handle -> V.mapM_ (\a -> unPut (put a) handle) v)
+        Put (\putBuf -> V.mapM_ (\a -> unPut (put a) putBuf) v)

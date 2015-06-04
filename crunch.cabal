@@ -8,9 +8,9 @@ Copyright: 2015 Gabriel Gonzalez
 Author: Gabriel Gonzalez
 Maintainer: Gabriel439@gmail.com
 Bug-Reports: https://github.com/Gabriel439/Haskell-Crunch-Library/issues
-Synopsis: Really fast serialization to and from handles
-Description: @crunch@ is a serialization library specialized to reading from and
-    writing to handles
+Synopsis: Really fast serialization
+Description: @crunch@ is a serialization library that maximizes efficiency by
+    using direct buffer-to-buffer copies
 Category: System
 Source-Repository head
     Type: git
