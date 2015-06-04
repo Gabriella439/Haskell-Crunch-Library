@@ -195,7 +195,7 @@ class Serializable a where
     default get :: Storable a => Get a
     get   = Get (\getBuf -> Foreign.alloca (\pointer -> do
         let numBytes = Foreign.sizeOf (undefined :: a)
-        n <- getBuf pointer (Foreign.sizeOf numBytes)
+        n <- getBuf pointer numBytes
         if n < numBytes
             then fail "Storable a => Serializable a: get - Insufficient bytes"
             else return ()
