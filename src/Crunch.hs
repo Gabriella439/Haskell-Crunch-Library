@@ -21,8 +21,7 @@
 >>> -- Connect to the server in another window
 >>> import Crunch
 >>> import Network.Simple.TCP
->>> connect "127.0.0.1" "8000" (\(socket, _) -> encodeSocket socket ([1..100] ::
-[Int]))
+>>> connect "127.0.0.1" "8000" (\(socket, _) -> encodeSocket socket ([1..10] :: [Int]))
 
     The server will print @[1,2,3,4,5,6,7,8,9,10]@
 -}
