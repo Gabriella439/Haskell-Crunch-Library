@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DefaultSignatures   #-}
 {-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE BangPatterns        #-}
 
 {-| Example usage for files:
 
@@ -46,18 +47,23 @@ import Control.Exception (bracketOnError)
 import Control.Monad (replicateM)
 import Data.Array (Ix)
 import qualified Data.Array as A
-import qualified Data.ByteString      as Strict
-import qualified Data.ByteString.Lazy as Lazy
+import qualified Data.ByteString      as StrictBytes
+import qualified Data.ByteString.Lazy as LazyBytes
 import qualified Data.ByteString.Unsafe as Unsafe
 import Data.Foldable (toList)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map (Map)
 import qualified Data.Map.Strict as Map
+import qualified Data.Primitive as Primitive
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import Data.Set (Set)
 import qualified Data.Set as Set
+import qualified Data.Text      as StrictText
+import qualified Data.Text.Lazy as LazyText
+import qualified Data.Text.Array    as Unsafe
+import qualified Data.Text.Internal as Unsafe
 import Data.Tree (Tree(..))
 import Data.Vector.Unboxed (Unbox)
 import qualified Data.Vector          as V
@@ -65,6 +71,7 @@ import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Unboxed  as VU
 import qualified Foreign.Safe as Foreign
 import Foreign.Safe (Storable(..))
+import qualified GHC.Ptr as Unsafe
 import Network.Socket (Socket)
 import Network.Socket.ByteString as Socket
 import qualified System.IO as IO
@@ -470,7 +477,7 @@ instance Serializable a => Serializable (V.Vector a) where
         -- Equivalent to `V.replicateM n get`, but faster due to specialization
         Get (\getBuf -> V.replicateM n (unGet get getBuf))
 
-instance Serializable Strict.ByteString where
+instance Serializable StrictBytes.ByteString where
     put bytestring = Put (\putBuf -> do
         Unsafe.unsafeUseAsCStringLen bytestring (\(pointer, numBytes) -> do
             unPut (put numBytes) putBuf
@@ -494,10 +501,51 @@ instance Serializable Strict.ByteString where
                 numBytes
                 (Foreign.free pointer) ) )
 
-instance Serializable Lazy.ByteString where
-    put bytestring = put (Lazy.toChunks bytestring)
+instance Serializable LazyBytes.ByteString where
+    put bytestring = put (LazyBytes.toChunks bytestring)
 
-    get = fmap Lazy.fromChunks get
+    get = fmap LazyBytes.fromChunks get
+
+instance Serializable StrictText.Text where
+    put (Unsafe.Text (Unsafe.Array byteArray) n1 n2) = do
+        let byteSrc  = Primitive.ByteArray byteArray
+        let numBytes = n2 * 2  -- `n2` is the number of `Word16`s
+        put n2
+        Put (\putBuf -> do
+            mutableByteDest <- Primitive.newPinnedByteArray numBytes
+            Primitive.copyByteArray mutableByteDest 0 byteSrc n1 numBytes
+            byteDest <- Primitive.unsafeFreezeByteArray mutableByteDest
+            let !(Primitive.Addr addr) = Primitive.byteArrayContents byteDest
+            let pointer = Unsafe.Ptr addr
+            putBuf pointer numBytes )
+
+    get = do
+        n2 <- get
+        let numBytes = n2 * 2
+        Get (\getBuf -> do
+            mutablePinnedByteArray <- Primitive.newPinnedByteArray numBytes
+            let !(Primitive.Addr addr) = Primitive.mutableByteArrayContents
+                    mutablePinnedByteArray
+            let pointer = Unsafe.Ptr addr
+            n <- getBuf pointer numBytes
+            if n < numBytes
+                then fail "Serializable Text: get - Insufficient bytes"
+                else return ()
+            mutableByteArray <- Primitive.newByteArray numBytes
+            Primitive.copyMutableByteArray
+                mutableByteArray
+                0
+                mutablePinnedByteArray
+                0
+                numBytes
+            Primitive.ByteArray byteArray <- Primitive.unsafeFreezeByteArray
+                mutableByteArray
+            return (Unsafe.Text (Unsafe.Array byteArray) 0 n2) )
+
+instance Serializable LazyText.Text where
+    put text = put (LazyText.toChunks text)
+
+    get = fmap LazyText.fromChunks get
 
 instance (Ix i, Serializable i, Serializable a) => Serializable (A.Array i a) where
     put arr = put (A.bounds arr, A.elems arr)
