@@ -44,9 +44,21 @@ module Crunch (
 import Control.Applicative (Applicative(..))
 import Control.Exception (bracketOnError)
 import Control.Monad (replicateM)
+import Data.Array (Ix)
+import qualified Data.Array as A
 import qualified Data.ByteString      as Strict
 import qualified Data.ByteString.Lazy as Lazy
 import qualified Data.ByteString.Unsafe as Unsafe
+import Data.Foldable (toList)
+import Data.IntMap (IntMap)
+import qualified Data.IntMap.Strict as IntMap
+import Data.Map (Map)
+import qualified Data.Map.Strict as Map
+import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
+import Data.Set (Set)
+import qualified Data.Set as Set
+import Data.Tree (Tree(..))
 import qualified Data.Vector          as V
 import qualified Data.Vector.Storable as VS
 import qualified Foreign.Safe as Foreign
@@ -193,6 +205,11 @@ decodeSocket socket = unGet get (\pointer0 bytesRequired ->
 > instance Serializable T
 -}
 class Serializable a where
+    put :: a -> Put ()
+    default put :: Storable a => a -> Put ()
+    put a = Put (\putBuf -> Foreign.with a (\pointer ->
+        putBuf pointer (Foreign.sizeOf (undefined :: a)) ))
+
     get :: Get a
     default get :: Storable a => Get a
     get   = Get (\getBuf -> Foreign.alloca (\pointer -> do
@@ -202,11 +219,6 @@ class Serializable a where
             then fail "Storable a => Serializable a: get - Insufficient bytes"
             else return ()
         Foreign.peek pointer ))
-
-    put :: a -> Put ()
-    default put :: Storable a => a -> Put ()
-    put a = Put (\putBuf -> Foreign.with a (\pointer ->
-        putBuf pointer (Foreign.sizeOf (undefined :: a)) ))
 
 instance Serializable Bool
 instance Serializable Char
@@ -269,28 +281,34 @@ instance Serializable (Ptr a)
 instance Serializable (FunPtr a)
 
 instance (Serializable a, Serializable b) => Serializable (a, b) where
+    put (a, b) = do
+        put a
+        put b
+
     get = do
         a <- get
         b <- get
         return (a, b)
 
-    put (a, b) = do
+instance (Serializable a, Serializable b, Serializable c) => Serializable (a, b, c) where
+    put (a, b, c) = do
         put a
         put b
+        put c
 
-instance (Serializable a, Serializable b, Serializable c) => Serializable (a, b, c) where
     get = do
         a <- get
         b <- get
         c <- get
         return (a, b, c)
 
-    put (a, b, c) = do
+instance (Serializable a, Serializable b, Serializable c, Serializable d) => Serializable (a, b, c, d) where
+    put (a, b, c, d) = do
         put a
         put b
         put c
+        put d
 
-instance (Serializable a, Serializable b, Serializable c, Serializable d) => Serializable (a, b, c, d) where
     get = do
         a <- get
         b <- get
@@ -298,13 +316,14 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d) => Ser
         d <- get
         return (a, b, c, d)
 
-    put (a, b, c, d) = do
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e) => Serializable (a, b, c, d, e) where
+    put (a, b, c, d, e) = do
         put a
         put b
         put c
         put d
+        put e
 
-instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e) => Serializable (a, b, c, d, e) where
     get = do
         a <- get
         b <- get
@@ -313,14 +332,15 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
         e <- get
         return (a, b, c, d, e)
 
-    put (a, b, c, d, e) = do
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f) => Serializable (a, b, c, d, e, f) where
+    put (a, b, c, d, e, f) = do
         put a
         put b
         put c
         put d
         put e
+        put f
 
-instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f) => Serializable (a, b, c, d, e, f) where
     get = do
         a <- get
         b <- get
@@ -330,15 +350,16 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
         f <- get
         return (a, b, c, d, e, f)
 
-    put (a, b, c, d, e, f) = do
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g) => Serializable (a, b, c, d, e, f, g) where
+    put (a, b, c, d, e, f, g) = do
         put a
         put b
         put c
         put d
         put e
         put f
+        put g
 
-instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g) => Serializable (a, b, c, d, e, f, g) where
     get = do
         a <- get
         b <- get
@@ -349,7 +370,8 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
         g <- get
         return (a, b, c, d, e, f, g)
 
-    put (a, b, c, d, e, f, g) = do
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g, Serializable h) => Serializable (a, b, c, d, e, f, g, h) where
+    put (a, b, c, d, e, f, g, h) = do
         put a
         put b
         put c
@@ -357,8 +379,8 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
         put e
         put f
         put g
+        put h
 
-instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g, Serializable h) => Serializable (a, b, c, d, e, f, g, h) where
     get = do
         a <- get
         b <- get
@@ -370,7 +392,8 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
         h <- get
         return (a, b, c, d, e, f, g, h)
 
-    put (a, b, c, d, e, f, g, h) = do
+instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g, Serializable h, Serializable i) => Serializable (a, b, c, d, e, f, g, h, i) where
+    put (a, b, c, d, e, f, g, h, i) = do
         put a
         put b
         put c
@@ -379,8 +402,8 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
         put f
         put g
         put h
+        put i
 
-instance (Serializable a, Serializable b, Serializable c, Serializable d, Serializable e, Serializable f, Serializable g, Serializable h, Serializable i) => Serializable (a, b, c, d, e, f, g, h, i) where
     get = do
         a <- get
         b <- get
@@ -393,25 +416,7 @@ instance (Serializable a, Serializable b, Serializable c, Serializable d, Serial
         i <- get
         return (a, b, c, d, e, f, g, h, i)
 
-    put (a, b, c, d, e, f, g, h, i) = do
-        put a
-        put b
-        put c
-        put d
-        put e
-        put f
-        put g
-        put h
-        put i
-
 instance Serializable a => Serializable [a] where
-    get = do
-        n <- get :: Get Int
-        case n of
-            0 -> return []
-            _ -> do
-                prefix <- replicateM (fromIntegral n) get
-                fmap (prefix ++) get
     put as = case as of
         [] -> put (0 :: Int)
         _  -> do
@@ -423,7 +428,22 @@ instance Serializable a => Serializable [a] where
             mapM_ put prefix
             put suffix
 
+    get = do
+        n <- get :: Get Int
+        case n of
+            0 -> return []
+            _ -> do
+                prefix <- replicateM (fromIntegral n) get
+                fmap (prefix ++) get
+
 instance Storable a => Serializable (VS.Vector a) where
+    put v = do
+        let numElements = VS.length v
+            elementSize = Foreign.sizeOf (undefined :: a)
+        put numElements
+        Put (\putBuf -> VS.unsafeWith v (\pointer ->
+            putBuf pointer (numElements * elementSize) ))
+
     get = do
         numElements <- get
         let elementSize = Foreign.sizeOf (undefined :: a)
@@ -437,23 +457,16 @@ instance Storable a => Serializable (VS.Vector a) where
                 else return ()
             return (VS.unsafeFromForeignPtr0 foreignPointer numElements))
 
-    put v = do
-        let numElements = VS.length v
-            elementSize = Foreign.sizeOf (undefined :: a)
-        put numElements
-        Put (\putBuf -> VS.unsafeWith v (\pointer ->
-            putBuf pointer (numElements * elementSize) ))
-
 instance Serializable a => Serializable (V.Vector a) where
-    get = do
-        n  <- get
-        -- Equivalent to `V.replicateM n get`, but faster due to specialization
-        Get (\getBuf -> V.replicateM n (unGet get getBuf))
-
     put v = do
         put (V.length v)
         -- Equivalent to `V.mapM_ put v`, but faster due to specialization
         Put (\putBuf -> V.mapM_ (\a -> unPut (put a) putBuf) v)
+
+    get = do
+        n  <- get
+        -- Equivalent to `V.replicateM n get`, but faster due to specialization
+        Get (\getBuf -> V.replicateM n (unGet get getBuf))
 
 instance Serializable Strict.ByteString where
     put bytestring = Put (\putBuf -> do
@@ -483,3 +496,37 @@ instance Serializable Lazy.ByteString where
     put bytestring = put (Lazy.toChunks bytestring)
 
     get = fmap Lazy.fromChunks get
+
+instance (Ix i, Serializable i, Serializable a) => Serializable (A.Array i a) where
+    put arr = put (A.bounds arr, A.elems arr)
+    get = fmap (uncurry A.listArray) get
+
+instance Serializable a => Serializable (Set a) where
+    put set = put (Set.toAscList set)
+
+    get = fmap Set.fromDistinctAscList get
+
+instance (Serializable k, Serializable v) => Serializable (Map k v) where
+    put m = put (Map.toAscList m)
+
+    get = fmap Map.fromDistinctAscList get
+
+instance Serializable a => Serializable (IntMap a) where
+    put m = put (IntMap.toAscList m)
+
+    get = fmap IntMap.fromDistinctAscList get
+
+instance Serializable a => Serializable (Seq a) where
+    put s = put (toList s)
+
+    get = fmap Seq.fromList get
+
+instance Serializable a => Serializable (Tree a) where
+    put (Node a ts) = do
+        put a
+        put ts
+
+    get = do
+        a  <- get
+        ts <- get
+        return (Node a ts)
